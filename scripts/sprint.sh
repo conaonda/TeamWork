@@ -2,22 +2,22 @@
 # TeamWork 스프린트 자동화 스크립트
 # Claude CLI를 루프로 실행하여 매 루프가 하나의 스프린트가 됩니다.
 #
-# 사용법: ./scripts/sprint.sh --repo owner/repo [--sprints N] [--log-dir ./logs]
+# 사용법: sprint.sh --repo owner/repo --workdir /path/to/dir [--sprints N] [--start N]
 
 set -euo pipefail
 
 # --- 기본값 ---
 REPO=""
+WORKDIR=""
 MAX_SPRINTS=5
-LOG_DIR="./sprint-logs"
 SPRINT_NUM=1
 
 # --- 인자 파싱 ---
 while [[ $# -gt 0 ]]; do
   case $1 in
     --repo)     REPO="$2"; shift 2 ;;
+    --workdir)  WORKDIR="$2"; shift 2 ;;
     --sprints)  MAX_SPRINTS="$2"; shift 2 ;;
-    --log-dir)  LOG_DIR="$2"; shift 2 ;;
     --start)    SPRINT_NUM="$2"; shift 2 ;;
     *)          echo "Unknown option: $1"; exit 1 ;;
   esac
@@ -25,11 +25,48 @@ done
 
 if [[ -z "$REPO" ]]; then
   echo "Error: --repo 옵션이 필요합니다."
-  echo "사용법: ./scripts/sprint.sh --repo owner/repo [--sprints N]"
+  echo "사용법: sprint.sh --repo owner/repo --workdir /path/to/dir [--sprints N]"
   exit 1
 fi
 
+if [[ -z "$WORKDIR" ]]; then
+  echo "Error: --workdir 옵션이 필요합니다."
+  echo "사용법: sprint.sh --repo owner/repo --workdir /path/to/dir [--sprints N]"
+  exit 1
+fi
+
+# --- 저장소 이름 추출 (owner/repo → repo) ---
+REPO_NAME="${REPO##*/}"
+
+# --- 작업 디렉토리 설정 ---
+mkdir -p "$WORKDIR"
+cd "$WORKDIR"
+
+# 저장소가 없으면 클론
+if [[ ! -d "$REPO_NAME" ]]; then
+  echo "저장소 클론 중: $REPO → $WORKDIR/$REPO_NAME"
+  gh repo clone "$REPO"
+fi
+
+cd "$REPO_NAME"
+
+# 로그 디렉토리 생성
+LOG_DIR="./sprint-logs"
 mkdir -p "$LOG_DIR"
+
+# 시작 번호 자동 결정 (--start 미지정 시 기존 로그에서 이어감)
+if [[ "$SPRINT_NUM" -eq 1 ]]; then
+  LAST=$(ls "$LOG_DIR"/sprint-*-1-orchestrator-start.log 2>/dev/null \
+    | sed 's/.*sprint-\([0-9]*\)-.*/\1/' | sort -n | tail -1)
+  if [[ -n "$LAST" ]]; then
+    SPRINT_NUM=$((LAST + 1))
+  fi
+fi
+
+# .gitignore에 sprint-logs/ 추가
+if [[ ! -f .gitignore ]] || ! grep -qx "sprint-logs/" .gitignore 2>/dev/null; then
+  echo "sprint-logs/" >> .gitignore
+fi
 
 # --- 역할별 프롬프트 ---
 orchestrator_start_prompt() {
@@ -120,7 +157,7 @@ run_agent() {
   local log_file="$LOG_DIR/sprint-${sprint}-${role}.log"
 
   echo "  [$role] 실행 중..."
-  claude --print "$prompt" > "$log_file" 2>&1 || true
+  claude --print --dangerously-skip-permissions "$prompt" > "$log_file" 2>&1 || true
   echo "  [$role] 완료 → $log_file"
 }
 
@@ -128,6 +165,7 @@ run_agent() {
 echo "========================================="
 echo " TeamWork 스프린트 자동화"
 echo " 저장소: $REPO"
+echo " 작업 디렉토리: $(pwd)"
 echo " 스프린트: $SPRINT_NUM ~ $((SPRINT_NUM + MAX_SPRINTS - 1))"
 echo "========================================="
 
@@ -149,5 +187,5 @@ done
 echo ""
 echo "========================================="
 echo " 전체 스프린트 완료"
-echo " 로그: $LOG_DIR/"
+echo " 로그: $(pwd)/$LOG_DIR/"
 echo "========================================="

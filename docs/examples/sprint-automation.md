@@ -186,9 +186,13 @@ gh issue create --title "[Research] UI 라이브러리 벤치마킹" \
 ## 4단계: 자동화 스크립트 실행
 
 ```bash
-# 스프린트 자동화 실행
-./scripts/sprint.sh --repo owner/todo-app --sprints 3
+# 스프린트 자동화 실행 (어디서든 실행 가능)
+/path/to/TeamWork/scripts/sprint.sh --repo owner/todo-app --workdir ~/git --sprints 3
 ```
+
+- `--workdir ~/git` — 저장소를 클론/사용할 상위 디렉토리
+- 저장소가 없으면 자동 클론, 있으면 기존 체크아웃 사용
+- 로그는 `~/git/todo-app/sprint-logs/`에 생성됨
 
 스크립트 상세는 [`scripts/sprint.sh`](../../scripts/sprint.sh)를 참고하세요.
 
