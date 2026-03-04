@@ -1,0 +1,41 @@
+name: 기능 요청
+description: 새로운 기능을 제안할 때 사용하세요
+title: "[Feature] "
+labels: ["type/feature"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 기능 요약
+      description: 어떤 기능인지 간단히 설명해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: 배경 및 목적
+      description: 이 기능이 필요한 이유를 설명해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: requirements
+    attributes:
+      label: 요구사항
+      description: 구체적인 요구사항을 나열해 주세요.
+      placeholder: |
+        - [ ] 요구사항 1
+        - [ ] 요구사항 2
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 수락 기준
+      description: 이 기능이 완료되었다고 판단할 수 있는 기준을 작성해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 대안
+      description: 고려한 다른 접근 방식이 있다면 설명해 주세요.

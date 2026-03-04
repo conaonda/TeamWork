@@ -1,0 +1,41 @@
+name: 기술 조사
+description: 외부 서비스/기술 벤치마킹이 필요할 때 사용하세요
+title: "[Research] "
+labels: ["type/task", "agent/researcher"]
+body:
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 조사 목적
+      description: 이 조사가 필요한 이유와 배경을 설명해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 조사 범위
+      description: 조사할 대상(서비스, 기술, 라이브러리 등)을 나열해 주세요.
+      placeholder: |
+        - 서비스/기술 A
+        - 서비스/기술 B
+        - 서비스/기술 C
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: 비교 기준
+      description: 어떤 기준으로 비교/분석해야 하나요?
+      placeholder: |
+        - 기능 범위
+        - 성능
+        - 라이선스
+        - 커뮤니티 활성도
+        - 비용
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 참고 사항
+      description: 추가 맥락이나 관련 이슈가 있다면 작성해 주세요.
