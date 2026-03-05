@@ -58,6 +58,7 @@ LOG_DIR="./sprint-logs"
 mkdir -p "$LOG_DIR"
 
 # 시작 번호 자동 결정 (--start 미지정 시 git 태그에서 이어감)
+git fetch --tags --quiet 2>/dev/null || echo "[경고] 원격 태그 fetch 실패"
 if [[ "$SPRINT_NUM" -eq 1 ]]; then
   LAST=$(git tag -l 'sprint-*' 2>/dev/null \
     | sed 's/sprint-//' | sort -n | tail -1)
@@ -269,6 +270,14 @@ for ((i=0; i<MAX_SPRINTS; i++)); do
   current=$((SPRINT_NUM + i))
   SPRINT_FAILED=false
   echo ""
+
+  # 원격 태그 동기화 후 중복 검사
+  git fetch --tags --quiet 2>/dev/null
+  if git tag -l "sprint-${current}" | grep -q .; then
+    echo "  [건너뜀] sprint-${current} 태그가 이미 존재합니다."
+    continue
+  fi
+
   echo "----- Sprint $current 시작 -----"
 
   # 1. Orchestrator 시작
@@ -317,9 +326,14 @@ for ((i=0; i<MAX_SPRINTS; i++)); do
     echo "  [경고] Orchestrator 마무리 실패."
   fi
 
-  # 스프린트 완료 태그 생성
-  git tag "sprint-${current}" 2>/dev/null || \
+  # 스프린트 완료 태그 생성 및 원격 push
+  git fetch --tags --quiet 2>/dev/null
+  if git tag "sprint-${current}" 2>/dev/null; then
+    git push origin "sprint-${current}" 2>/dev/null || \
+      echo "  [경고] sprint-${current} 태그 push 실패"
+  else
     echo "  [경고] sprint-${current} 태그 생성 실패 (이미 존재할 수 있음)"
+  fi
 
   echo "----- Sprint $current 완료 -----"
 done
