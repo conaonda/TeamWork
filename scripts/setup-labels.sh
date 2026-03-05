@@ -32,6 +32,7 @@ gh label create "agent/developer"  --color "1d76db" --description "Developer 에
 gh label create "agent/reviewer"   --color "5319e7" --description "Reviewer 에이전트 담당"  --repo "$REPO" --force
 gh label create "agent/tester"     --color "0e8a16" --description "Tester 에이전트 담당"    --repo "$REPO" --force
 gh label create "agent/researcher" --color "d4c5f9" --description "Researcher 에이전트 담당" --repo "$REPO" --force
+gh label create "agent/documenter" --color "c2e0c6" --description "Documenter 에이전트 담당" --repo "$REPO" --force
 
 # Status 추가
 gh label create "status/in-progress" --color "fbca04" --description "작업 진행 중"        --repo "$REPO" --force

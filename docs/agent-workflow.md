@@ -7,10 +7,10 @@
                ┌───→│ Researcher │───┐
                │    │ 기술 조사    │   │
                │    └────────────┘   │
-┌─────────────┐│                     ▼  ┌──────────┐     ┌──────────────┐
-│ Orchestrator│├────────────────────→│ Developer │────→│ Reviewer │────→│ Orchestrator │
-│ 이슈 분석    │                     │ 구현 & PR  │     │ 코드리뷰  │     │ 머지          │
-└─────────────┘                     └───────────┘     └──────────┘     └──────────────┘
+┌─────────────┐│                     ▼  ┌──────────┐     ┌──────────────┐     ┌────────────┐
+│ Orchestrator│├────────────────────→│ Developer │────→│ Reviewer │────→│ Orchestrator │────→│ Documenter │
+│ 이슈 분석    │                     │ 구현 & PR  │     │ 코드리뷰  │     │ 머지          │     │ 문서 갱신    │
+└─────────────┘                     └───────────┘     └──────────┘     └──────────────┘     └────────────┘
                                                            │
                                                       ┌────┴─────┐
                                                       │  Tester  │
@@ -88,6 +88,17 @@ gh pr view <number> --json reviews
 
 # 머지
 gh pr merge <number> --squash --delete-branch
+```
+
+### 6. 문서 갱신 (Documenter) — 머지 후
+```bash
+# 머지된 PR의 변경 파일 확인
+gh pr view <number> --json files
+
+# 문서 갱신이 필요한 경우 docs/ 브랜치에서 업데이트 PR 생성
+git checkout -b docs/<number>-update-docs develop
+# 문서 업데이트 작업 수행
+gh pr create --title "docs: PR #<number> 문서 업데이트" --base develop
 ```
 
 ## 에이전트 간 커뮤니케이션

@@ -9,6 +9,7 @@
 | Reviewer | 코드리뷰, 보안/품질 체크 | PR 생성 |
 | Tester | 테스트 작성 및 실행, 커버리지 확인 | PR 생성, 코드 변경 |
 | Researcher | 외부 서비스/기술 벤치마킹, 기술 조사 | Orchestrator 할당 (agent/researcher 라벨) |
+| Documenter | 코드 문서화, API 문서 생성, 프로젝트 문서 관리, CHANGELOG 작성 | PR 머지 후 (agent/documenter 라벨) |
 
 ---
 
@@ -163,3 +164,53 @@ npm run test:coverage
 - 웹 검색 및 문서 분석
 - GitHub 저장소 분석 (`gh repo view`, star/issue 수 등)
 - API 문서 확인
+
+---
+
+## Documenter
+
+**책임:**
+- PR 머지 후 변경된 코드의 문서화 상태 검증 (JSDoc/주석 누락 확인)
+- API 문서 자동 생성 및 갱신
+- README, 아키텍처 문서 등 프로젝트 레벨 문서 업데이트
+- CHANGELOG 작성 (커밋 히스토리 기반)
+- 문서 간 링크 무결성 검증
+
+**입력:** 머지된 PR diff, 변경된 파일 목록, 기존 문서
+**출력:** 문서 업데이트 PR (브랜치: `docs/<number>-description`)
+
+**워크플로우:**
+1. PR 머지 이벤트 감지
+2. 변경된 파일의 공개 API/인터페이스 변경 여부 확인
+3. 문서 갱신이 필요한 항목 식별
+4. 문서 업데이트 후 PR 생성
+
+**사용 명령어:**
+```bash
+# 머지된 PR의 변경사항 확인
+gh pr diff <number>
+gh pr view <number> --json files
+
+# 문서 업데이트 PR 생성
+git checkout develop
+git checkout -b docs/<number>-update-docs
+git add docs/ README.md CHANGELOG.md
+git commit -m "docs: PR #<number> 관련 문서 업데이트"
+git push -u origin docs/<number>-update-docs
+gh pr create --title "docs: PR #<number> 문서 업데이트" --base develop
+```
+
+**출력 형식:**
+```markdown
+## 문서 업데이트: PR #<number>
+
+### 변경 항목
+- [갱신] `docs/api.md` — 새 엔드포인트 추가
+- [갱신] `README.md` — 설치 방법 수정
+- [추가] `CHANGELOG.md` — v1.x.x 항목 추가
+
+### 검증
+- [ ] 코드 내 JSDoc/주석 누락 없음
+- [ ] API 문서와 실제 구현 일치
+- [ ] 문서 내 링크 유효
+```
