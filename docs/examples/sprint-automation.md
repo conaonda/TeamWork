@@ -96,7 +96,9 @@ gh issue create --title "[Research] UI 라이브러리 벤치마킹" \
 │       ↓                                                  │
 │  5. Tester        — 테스트 작성/검증                       │
 │       ↓                                                  │
-│  6. Orchestrator  — 머지, 스프린트 정리                    │
+│  6. Documenter    — 문서 갱신                              │
+│       ↓                                                  │
+│  7. Orchestrator  — 머지, 스프린트 정리                    │
 │                                                          │
 └──────────────────────────── 다음 스프린트 →───────────────┘
 ```
@@ -190,9 +192,32 @@ gh issue create --title "[Research] UI 라이브러리 벤치마킹" \
 /path/to/TeamWork/scripts/sprint.sh --repo owner/todo-app --workdir ~/git --sprints 3
 ```
 
-- `--workdir ~/git` — 저장소를 클론/사용할 상위 디렉토리
+### 옵션 설명
+
+| 옵션 | 필수 | 설명 |
+|------|------|------|
+| `--repo owner/repo` | 필수 | 대상 GitHub 저장소 |
+| `--workdir /path` | 필수 | 저장소를 클론/사용할 상위 디렉토리 |
+| `--sprints N` | 선택 | 실행할 스프린트 수 (기본값: 5) |
+| `--start N` | 선택 | 시작 스프린트 번호 (기본값: git 태그에서 자동 결정) |
+| `--research` | 선택 | Researcher 에이전트 활성화 |
+| `--parallel` | 선택 | Researcher와 Developer 병렬 실행 |
+| `--effort high\|medium\|low` | 선택 | 모든 에이전트의 effort 일괄 오버라이드 (기본값: 역할별 설정) |
+
+**역할별 기본 effort:**
+
+| 역할 | 모델 | Effort |
+|------|------|--------|
+| Orchestrator | opus | low |
+| Researcher | sonnet | low |
+| Developer | opus | low |
+| Reviewer | sonnet | low |
+| Tester | sonnet | medium |
+| Documenter | sonnet | low |
+
 - 저장소가 없으면 자동 클론, 있으면 기존 체크아웃 사용
 - 로그는 `~/git/todo-app/sprint-logs/`에 생성됨
+- ESC 키로 현재 스프린트 완료 후 중단 예약 가능
 
 스크립트 상세는 [`scripts/sprint.sh`](../../scripts/sprint.sh)를 참고하세요.
 
