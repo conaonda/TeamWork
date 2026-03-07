@@ -96,9 +96,35 @@ EFFORT_REVIEWER="low"
 EFFORT_TESTER="medium"
 EFFORT_DOCUMENTER="low"
 
-# .gitignore에 sprint-logs/ 추가
-if [[ ! -f .gitignore ]] || ! grep -qx "sprint-logs/" .gitignore 2>/dev/null; then
-  echo "sprint-logs/" >> .gitignore
+# .gitignore 설정: 전체 로그는 로컬 전용, 구조화 산출물만 git 추적
+_setup_gitignore() {
+  local changed=false
+  if [[ ! -f .gitignore ]] || ! grep -qx "sprint-logs/" .gitignore 2>/dev/null; then
+    echo "sprint-logs/" >> .gitignore
+    changed=true
+  fi
+  # 로그 파일은 로컬 전용 (저장소 비대화 방지)
+  if ! grep -qx "sprint-logs/\*.log" .gitignore 2>/dev/null; then
+    echo "sprint-logs/*.log" >> .gitignore
+    changed=true
+  fi
+  # 구조화 산출물은 git 추적 예외 처리
+  for pattern in "!sprint-logs/*.handoff.json" "!sprint-logs/sprint-memory.md" "!sprint-logs/*-summary.json"; do
+    if ! grep -qFx "$pattern" .gitignore 2>/dev/null; then
+      echo "$pattern" >> .gitignore
+      changed=true
+    fi
+  done
+  [[ "$changed" == true ]] && echo "  [설정] .gitignore 업데이트 완료"
+}
+_setup_gitignore
+
+# CLAUDE.md 부재 경고
+if [[ ! -f "CLAUDE.md" ]]; then
+  echo "  [경고] CLAUDE.md 없음 — 에이전트가 프로젝트 컨텍스트를 파악하기 어렵습니다."
+  echo "  → TeamWork 저장소의 CLAUDE.md를 참고하여 프로젝트별 CLAUDE.md를 생성하세요."
+  echo "  → 계속 진행하려면 Enter, 중단하려면 Ctrl+C"
+  read -r || true
 fi
 
 # --- 사용량 체크 (Claude Code OAuth API) ---
@@ -196,26 +222,61 @@ print(d.get('five_hour', {}).get('resets_at', ''))
 # --- 이전 단계 요약 생성 ---
 summarize_log() {
   local log_file="$1"
-  if [[ -f "$log_file" ]]; then
-    # 마지막 30줄을 요약으로 사용 (핵심 결과가 끝에 있는 경향)
-    tail -30 "$log_file" 2>/dev/null || echo "(로그 없음)"
-  else
-    echo "(이전 단계 로그 없음)"
+  local handoff_file="${log_file%.log}.handoff.json"
+
+  # 1순위: 핸드오프 JSON (구조화된 정보, 정보 밀도 최고)
+  if [[ -f "$handoff_file" ]]; then
+    cat "$handoff_file"
+    return
   fi
+
+  # 2순위: 폴백 — ANSI 코드 및 claude CLI 노이즈 제거 후 tail
+  if [[ -f "$log_file" ]]; then
+    sed 's/\x1B\[[0-9;]*[mK]//g' "$log_file" \
+      | grep -v '^[[:space:]]*$' \
+      | grep -v $'^\s*[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏◐◓◑◒]' \
+      | grep -v '^\s*> \(Bash\|Read\|Glob\|Write\|Edit\|Grep\|WebSearch\|WebFetch\)' \
+      | tail -40
+    return
+  fi
+
+  echo "(이전 단계 로그 없음)"
 }
 
 # --- 역할별 프롬프트 ---
 orchestrator_start_prompt() {
+  local memory_file="$LOG_DIR/sprint-memory.md"
+  local memory_context=""
+  if [[ -f "$memory_file" ]]; then
+    memory_context=$(cat "$memory_file")
+  fi
   cat <<EOF
 당신은 Orchestrator 에이전트입니다. 저장소: $REPO
 
-스프린트 $1을 시작합니다. 다음 작업을 수행하세요:
+## 프로젝트 메모리 (이전 스프린트 누적 정보):
+${memory_context:-"(첫 스프린트 — 메모리 없음)"}
+
+## 스프린트 $1 시작 작업:
 1. \`gh issue list --repo $REPO --state open --assignee ""\`로 미할당 이슈를 확인하세요.
 2. 우선순위를 판단하고 이번 스프린트에서 처리할 이슈를 선택하세요 (최대 3개).
 3. 기술 조사가 필요한 이슈는 \`agent/researcher\` 라벨을, 구현 이슈는 \`agent/developer\` 라벨을 지정하세요.
 4. 스프린트 계획을 각 이슈 코멘트로 남기세요.
 
 미할당 이슈가 없으면 프로젝트 상태를 분석하고 새 이슈를 생성하세요.
+
+## 완료 후 필수 — 핸드오프 파일 생성:
+아래 내용으로 \`sprint-logs/sprint-$1-1-orchestrator-start.handoff.json\` 파일을 생성하세요:
+\`\`\`json
+{
+  "role": "orchestrator-start",
+  "sprint": $1,
+  "status": "success 또는 failure",
+  "selected_issues": [{"number": 이슈번호, "title": "이슈제목", "labels": ["라벨"]}],
+  "researcher_needed": true 또는 false,
+  "issues": ["문제점이나 특이사항"],
+  "next_action": "다음 에이전트를 위한 한 줄 요약"
+}
+\`\`\`
 EOF
 }
 
@@ -234,6 +295,20 @@ ${prev_summary}
 3. 이슈가 있으면 조사 범위와 비교 기준에 따라 외부 서비스/기술을 조사하세요.
 4. 구조화된 비교 표와 권장 사항을 이슈 코멘트로 작성하세요.
 5. 완료 후 \`agent/researcher\` 라벨을 제거하세요.
+
+## 완료 후 필수 — 핸드오프 파일 생성:
+아래 내용으로 \`sprint-logs/sprint-$1-2-researcher.handoff.json\` 파일을 생성하세요:
+\`\`\`json
+{
+  "role": "researcher",
+  "sprint": $1,
+  "status": "success, skipped 또는 failure",
+  "researched_issues": [이슈번호],
+  "key_findings": ["핵심 발견사항 요약"],
+  "recommendation": "권장 기술/접근법 한 줄 요약",
+  "next_action": "Developer를 위한 한 줄 요약"
+}
+\`\`\`
 EOF
 }
 
@@ -258,6 +333,21 @@ ${researcher_summary}
 4. 이슈 요구사항에 따라 구현하세요.
 5. 테스트가 통과하는지 확인하세요.
 6. 커밋 컨벤션에 따라 커밋하고 PR을 생성하세요 (\`closes #이슈번호\`).
+
+## 완료 후 필수 — 핸드오프 파일 생성:
+아래 내용으로 \`sprint-logs/sprint-$1-3-developer.handoff.json\` 파일을 생성하세요:
+\`\`\`json
+{
+  "role": "developer",
+  "sprint": $1,
+  "status": "success, skipped 또는 failure",
+  "completed": ["완료된 이슈 제목 목록"],
+  "pr_numbers": [PR번호들],
+  "branch_names": ["브랜치명들"],
+  "issues": ["발견된 문제점이나 특이사항"],
+  "next_action": "Reviewer와 Tester를 위한 한 줄 요약"
+}
+\`\`\`
 EOF
 }
 
@@ -276,53 +366,65 @@ ${dev_summary}
 3. PR이 있으면 diff를 분석하세요.
 4. 코드리뷰 가이드에 따라 리뷰하고 결과를 제출하세요.
 5. 문제가 없으면 승인, 있으면 변경 요청하세요.
+
+## 완료 후 필수 — 핸드오프 파일 생성:
+아래 내용으로 \`sprint-logs/sprint-$1-4-reviewer.handoff.json\` 파일을 생성하세요:
+\`\`\`json
+{
+  "role": "reviewer",
+  "sprint": $1,
+  "status": "success, skipped 또는 failure",
+  "reviewed_prs": [PR번호들],
+  "approved_prs": [승인된 PR번호들],
+  "change_requested_prs": [변경요청 PR번호들],
+  "issues": ["주요 리뷰 지적사항"],
+  "next_action": "Tester를 위한 한 줄 요약"
+}
+\`\`\`
 EOF
 }
 
 tester_prompt() {
   local dev_summary
   dev_summary=$(summarize_log "$LOG_DIR/sprint-${1}-3-developer.log")
-  local review_summary
-  review_summary=$(summarize_log "$LOG_DIR/sprint-${1}-4-reviewer.log")
+  # 병렬 모드에서는 reviewer 로그가 없을 수 있으므로 조건부 포함
+  local review_context=""
+  if [[ "$PARALLEL" != true ]]; then
+    local review_summary
+    review_summary=$(summarize_log "$LOG_DIR/sprint-${1}-4-reviewer.log")
+    review_context="### Reviewer:
+${review_summary}"
+  fi
   cat <<EOF
 당신은 Tester 에이전트입니다. 저장소: $REPO
 
 ## 이전 단계 결과 요약:
 ### Developer:
 ${dev_summary}
-### Reviewer:
-${review_summary}
+${review_context}
 
 ## 작업:
-1. 승인된 PR의 변경사항을 확인하세요.
+1. \`gh pr list --repo $REPO --state open\`으로 PR의 변경사항을 확인하세요.
 2. 테스트할 PR이 없으면 "테스트 PR 없음"이라고 출력하고 종료하세요.
 3. 변경된 코드에 테스트가 충분한지 확인하세요.
 4. 부족하면 테스트를 추가하여 PR에 커밋하세요.
 5. 전체 테스트를 실행하고 결과를 PR 코멘트로 보고하세요.
-EOF
+
+## 완료 후 필수 — 핸드오프 파일 생성:
+아래 내용으로 \`sprint-logs/sprint-$1-5-tester.handoff.json\` 파일을 생성하세요:
+\`\`\`json
+{
+  "role": "tester",
+  "sprint": $1,
+  "status": "success, skipped 또는 failure",
+  "tested_prs": [PR번호들],
+  "tests_added": 추가한 테스트 수,
+  "total_tests": 전체 테스트 수,
+  "all_passed": true 또는 false,
+  "issues": ["실패한 테스트나 문제점"],
+  "next_action": "Orchestrator를 위한 한 줄 요약"
 }
-
-documenter_prompt() {
-  local dev_summary
-  dev_summary=$(summarize_log "$LOG_DIR/sprint-${1}-3-developer.log")
-  local test_summary
-  test_summary=$(summarize_log "$LOG_DIR/sprint-${1}-5-tester.log")
-  cat <<EOF
-당신은 Documenter 에이전트입니다. 저장소: $REPO
-
-## 이전 단계 결과 요약:
-### Developer:
-${dev_summary}
-### Tester:
-${test_summary}
-
-## 작업:
-1. 승인/머지된 PR의 변경사항을 확인하세요 (\`gh pr list --state merged\`).
-2. 문서화할 PR이 없으면 "문서화 대상 PR 없음"이라고 출력하고 종료하세요.
-3. 변경된 코드의 공개 API/인터페이스에 JSDoc/주석 누락이 있으면 추가하세요.
-4. README, API 문서, CHANGELOG 등 프로젝트 문서를 갱신하세요.
-5. 문서 업데이트가 있으면 \`docs/<이슈번호>-update-docs\` 브랜치에서 PR을 생성하세요.
-6. 문서 내 링크 유효성을 검증하세요.
+\`\`\`
 EOF
 }
 
@@ -333,8 +435,11 @@ orchestrator_end_prompt() {
   review_summary=$(summarize_log "$LOG_DIR/sprint-${1}-4-reviewer.log")
   local test_summary
   test_summary=$(summarize_log "$LOG_DIR/sprint-${1}-5-tester.log")
-  local doc_summary
-  doc_summary=$(summarize_log "$LOG_DIR/sprint-${1}-6-documenter.log")
+  local memory_file="$LOG_DIR/sprint-memory.md"
+  local memory_context=""
+  if [[ -f "$memory_file" ]]; then
+    memory_context=$(cat "$memory_file")
+  fi
   cat <<EOF
 당신은 Orchestrator 에이전트입니다. 저장소: $REPO
 
@@ -345,8 +450,6 @@ ${dev_summary}
 ${review_summary}
 ### Tester:
 ${test_summary}
-### Documenter:
-${doc_summary}
 
 ## 스프린트 $1 마무리 작업:
 1. 승인된 PR을 머지하세요 (\`gh pr merge --squash --delete-branch\`).
@@ -354,6 +457,79 @@ ${doc_summary}
 3. 남은 이슈나 새로 발견된 작업이 있으면 이슈로 등록하세요.
 4. 스프린트 $1 결과를 요약하세요.
 5. 릴리스가 적절하다면 develop→main PR 생성 및 태그를 생성하세요.
+
+## 프로젝트 메모리 업데이트 (sprint-logs/sprint-memory.md):
+현재 메모리:
+${memory_context:-"(없음 — 새로 생성하세요)"}
+
+sprint-logs/sprint-memory.md 파일을 다음 구조로 업데이트하세요:
+\`\`\`markdown
+# Sprint Memory — $REPO
+
+## 기술 스택 & 아키텍처 결정
+(이번 스프린트에서 새로 결정된 사항 추가, 기존 내용 유지)
+
+## 반복 패턴 & 주의사항
+(이번 스프린트에서 발견된 주의사항 추가)
+
+## 기술 부채 목록
+(새 항목 추가, 해결된 항목은 [x]로 표시)
+
+## 최근 3개 스프린트 요약
+### Sprint $1 ($(date '+%Y-%m-%d'))
+- 완료: (머지된 PR과 닫힌 이슈 목록)
+- 발견된 문제: (있는 경우)
+(이전 스프린트 요약은 최대 2개만 유지)
+\`\`\`
+
+## 완료 후 필수 — 핸드오프 파일 생성:
+아래 내용으로 \`sprint-logs/sprint-$1-6-orchestrator-end.handoff.json\` 파일을 생성하세요:
+\`\`\`json
+{
+  "role": "orchestrator-end",
+  "sprint": $1,
+  "status": "success 또는 failure",
+  "merged_prs": [머지된 PR번호들],
+  "closed_issues": [닫힌 이슈번호들],
+  "new_issues_created": [새로 생성된 이슈번호들],
+  "released": false 또는 {"version": "vX.Y.Z", "tag": "vX.Y.Z"},
+  "next_action": "Documenter를 위한 한 줄 요약"
+}
+\`\`\`
+EOF
+}
+
+documenter_prompt() {
+  # Orchestrator-end 이후 실행 — 실제 머지된 PR을 대상으로 문서화
+  local orch_end_summary
+  orch_end_summary=$(summarize_log "$LOG_DIR/sprint-${1}-6-orchestrator-end.log")
+  cat <<EOF
+당신은 Documenter 에이전트입니다. 저장소: $REPO
+
+## Orchestrator가 완료한 작업 (머지된 PR 정보):
+${orch_end_summary}
+
+## 작업:
+1. 위 요약에서 머지된 PR 번호를 확인하세요. 머지된 PR이 없으면 "문서화 대상 없음"을 출력하고 종료하세요.
+2. \`gh pr view <number> --json files,title,body\`로 각 PR의 변경 파일을 확인하세요.
+3. 변경된 코드의 공개 API/인터페이스에 JSDoc/주석 누락이 있으면 추가하세요.
+4. README, API 문서, CHANGELOG 등 프로젝트 문서를 갱신하세요.
+5. 문서 업데이트가 있으면 \`docs/sprint-$1-update-docs\` 브랜치에서 PR을 생성하세요.
+6. 문서 내 링크 유효성을 검증하세요.
+
+## 완료 후 필수 — 핸드오프 파일 생성:
+아래 내용으로 \`sprint-logs/sprint-$1-7-documenter.handoff.json\` 파일을 생성하세요:
+\`\`\`json
+{
+  "role": "documenter",
+  "sprint": $1,
+  "status": "success, skipped 또는 failure",
+  "documented_prs": [PR번호들],
+  "updated_files": ["갱신된 문서 파일 목록"],
+  "doc_pr_number": null 또는 PR번호,
+  "issues": ["발견된 문제점"]
+}
+\`\`\`
 EOF
 }
 
@@ -386,7 +562,11 @@ run_agent() {
     fi
 
     if claude --print --model "$model" $tool_args --effort "$effort" --dangerously-skip-permissions "$prompt" > "$log_file" 2>&1; then
-      echo "  [$role] 완료 → $log_file"
+      if [[ ! -s "$log_file" ]]; then
+        echo "  [$role] 경고: 로그 파일이 비어있습니다 — claude CLI 출력 없음"
+      else
+        echo "  [$role] 완료 → $log_file ($(wc -c < "$log_file") bytes)"
+      fi
       return 0
     fi
 
@@ -395,6 +575,53 @@ run_agent() {
 
   echo "  [$role] 실패 (${MAX_RETRIES}회 재시도 후) → $log_file"
   return 1
+}
+
+# --- 스프린트 결과 요약 JSON 생성 ---
+generate_sprint_summary() {
+  local sprint="$1"
+  local start_time="$2"
+  local end_time
+  end_time=$(date +%s)
+  local summary_file="$LOG_DIR/sprint-${sprint}-summary.json"
+
+  local start_iso
+  start_iso=$(date -d "@$start_time" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null \
+    || date -r "$start_time" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null \
+    || echo "")
+
+  local closed_issues merged_prs
+  closed_issues=$(gh issue list --repo "$REPO" --state closed --limit 20 \
+    --json number,title --jq "[.[] | select(.number != null)]" 2>/dev/null || echo "[]")
+  merged_prs=$(gh pr list --repo "$REPO" --state merged --limit 20 \
+    --json number,title,headRefName --jq "[.[] | select(.number != null)]" 2>/dev/null || echo "[]")
+
+  python3 - <<PYEOF 2>/dev/null || echo "  [경고] sprint summary JSON 생성 실패"
+import json
+from datetime import datetime
+
+start_time = $start_time
+end_time = $end_time
+closed_issues = $closed_issues
+merged_prs = $merged_prs
+
+summary = {
+    "sprint": $sprint,
+    "repo": "$REPO",
+    "date": datetime.fromtimestamp(start_time).strftime('%Y-%m-%d'),
+    "start_time": start_time,
+    "end_time": end_time,
+    "elapsed_seconds": end_time - start_time,
+    "closed_issues": closed_issues,
+    "merged_prs": merged_prs,
+    "issue_count": len(closed_issues),
+    "pr_count": len(merged_prs)
+}
+
+with open("$summary_file", "w", encoding="utf-8") as f:
+    json.dump(summary, f, ensure_ascii=False, indent=2)
+print(f"  [요약] sprint-$sprint-summary.json 생성 완료 ({len(closed_issues)}개 이슈, {len(merged_prs)}개 PR)")
+PYEOF
 }
 
 # --- ESC 키 감지 (중단 예약) ---
@@ -489,31 +716,41 @@ for ((i=0; i<MAX_SPRINTS; i++)); do
 
   check_esc
 
-  # 4. Reviewer
-  if ! run_agent "4-reviewer" "$(reviewer_prompt $current)" "$current" "$MODEL_REVIEWER" "$TOOLS_REVIEWER" "$EFFORT_REVIEWER"; then
-    echo "  [경고] Reviewer 실패. 계속 진행."
+  # 4. Reviewer + 5. Tester (--parallel 시 동시 실행, 순차 실행 시 Reviewer → Tester)
+  if [[ "$PARALLEL" == true ]]; then
+    echo "  [병렬] Reviewer + Tester 동시 실행"
+    run_agent "4-reviewer" "$(reviewer_prompt $current)" "$current" "$MODEL_REVIEWER" "$TOOLS_REVIEWER" "$EFFORT_REVIEWER" &
+    PID_REVIEWER=$!
+    run_agent "5-tester" "$(tester_prompt $current)" "$current" "$MODEL_TESTER" "$TOOLS_TESTER" "$EFFORT_TESTER" &
+    PID_TESTER=$!
+    wait $PID_REVIEWER || echo "  [경고] Reviewer 실패. 계속 진행."
+    wait $PID_TESTER   || echo "  [경고] Tester 실패. 계속 진행."
+  else
+    if ! run_agent "4-reviewer" "$(reviewer_prompt $current)" "$current" "$MODEL_REVIEWER" "$TOOLS_REVIEWER" "$EFFORT_REVIEWER"; then
+      echo "  [경고] Reviewer 실패. 계속 진행."
+    fi
+    check_esc
+    if ! run_agent "5-tester" "$(tester_prompt $current)" "$current" "$MODEL_TESTER" "$TOOLS_TESTER" "$EFFORT_TESTER"; then
+      echo "  [경고] Tester 실패. 계속 진행."
+    fi
   fi
 
   check_esc
 
-  # 5. Tester
-  if ! run_agent "5-tester" "$(tester_prompt $current)" "$current" "$MODEL_TESTER" "$TOOLS_TESTER" "$EFFORT_TESTER"; then
-    echo "  [경고] Tester 실패. 계속 진행."
+  # 6. Orchestrator 마무리 (PR 머지 포함) — Documenter보다 먼저 실행해야 실제 머지된 PR 참조 가능
+  if ! run_agent "6-orchestrator-end" "$(orchestrator_end_prompt $current)" "$current" "$MODEL_ORCHESTRATOR" "$TOOLS_ORCHESTRATOR" "$EFFORT_ORCHESTRATOR"; then
+    echo "  [경고] Orchestrator 마무리 실패."
   fi
 
   check_esc
 
-  # 6. Documenter
-  if ! run_agent "6-documenter" "$(documenter_prompt $current)" "$current" "$MODEL_DOCUMENTER" "$TOOLS_DOCUMENTER" "$EFFORT_DOCUMENTER"; then
+  # 7. Documenter — Orchestrator-end 이후 실행하여 실제 머지된 PR 기반 문서화
+  if ! run_agent "7-documenter" "$(documenter_prompt $current)" "$current" "$MODEL_DOCUMENTER" "$TOOLS_DOCUMENTER" "$EFFORT_DOCUMENTER"; then
     echo "  [경고] Documenter 실패. 계속 진행."
   fi
 
-  check_esc
-
-  # 7. Orchestrator 마무리
-  if ! run_agent "7-orchestrator-end" "$(orchestrator_end_prompt $current)" "$current" "$MODEL_ORCHESTRATOR" "$TOOLS_ORCHESTRATOR" "$EFFORT_ORCHESTRATOR"; then
-    echo "  [경고] Orchestrator 마무리 실패."
-  fi
+  # 스프린트 결과 요약 JSON 생성 (구조화 산출물 — git 추적됨)
+  generate_sprint_summary "$current" "$SPRINT_START"
 
   # 스프린트 완료 태그 생성 및 원격 push
   git fetch --tags --quiet 2>/dev/null
